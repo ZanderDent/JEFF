@@ -1,16 +1,13 @@
 import sys
 import os
-import requests
 from dotenv import load_dotenv
 from openai import OpenAI
 import time
-import speech_recognition as sr
 from PyQt5.QtWidgets import QApplication, QLabel, QWidget, QVBoxLayout, QLineEdit, QPushButton
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt
 import threading
-import tempfile
-import textwrap
+import speech_recognition as sr
 
 # Load environment variables from .env file
 load_dotenv()
@@ -22,7 +19,7 @@ def text_to_speech(input_text, voice="fable", format="mp3"):
         max_length = 4096
 
         # Split the text into smaller chunks if it's too long
-        if len(input_text) > max_length:  # Corrected comparison
+        if len(input_text) > max_length:
             text_parts = textwrap.wrap(input_text, max_length, break_long_words=False)
         else:
             text_parts = [input_text]
@@ -53,25 +50,43 @@ def jarvis_speak(text):
         os.system(f"afplay {audio_file_path}")  # macOS audio player
         os.remove(audio_file_path)
 
-# Recognize speech input
+# Real-time recognition and processing
 def recognize_speech(callback):
     recognizer = sr.Recognizer()
-    with sr.Microphone() as source:
+    mic = sr.Microphone()
+
+    with mic as source:
         recognizer.adjust_for_ambient_noise(source)
-        print("Microphone is active and ready to listen...")  # Confirm the microphone is active
+        print("Calibrating microphone for ambient noise...")
+
+    def listen_and_process():
+        print("Listening for the keyword 'Jeff'...")
         while True:
-            print("Listening for your command...")
             try:
-                audio = recognizer.listen(source)
-                print("Audio captured, processing...")
-                command = recognizer.recognize_google(audio)
-                print(f"Recognized: {command}")  # Show recognized command
-                callback(command.lower())
+                with mic as source:
+                    audio = recognizer.listen(source)
+                    command = recognizer.recognize_google(audio).lower()
+                    print(f"Recognized: {command}")
+
+                    if "jeff" in command:
+                        jarvis_speak("Yes?")
+                        print("Keyword detected. Listening for your command...")
+                        
+                        # Listen for the actual command
+                        with mic as source:
+                            audio = recognizer.listen(source)
+                            command = recognizer.recognize_google(audio)
+                            print(f"Command recognized: {command}")
+                            callback(command)
             except sr.UnknownValueError:
-                print("Could not understand audio")  # Show if recognition fails
-                jarvis_speak("Sorry, didn't catch that.")
+                print("Could not understand audio")
             except sr.RequestError as e:
-                print(f"Could not request results from Google Speech Recognition service; {e}")
+                print(f"Could not request results; {e}")
+
+    # Start the listening in a separate thread
+    listen_thread = threading.Thread(target=listen_and_process)
+    listen_thread.daemon = True
+    listen_thread.start()
 
 # Generate AI Response using the OpenAI API with retry mechanism
 def generate_response(prompt, retries=3):
@@ -85,12 +100,12 @@ def generate_response(prompt, retries=3):
                 ],
                 max_tokens=100
             )
-            return response.choices[0].message.content.strip()  # Corrected access to message content
+            return response.choices[0].message.content.strip()
 
         except Exception as e:
             print(f"Error generating response: {e}")
-            if attempt < retries - 1:  # Don't wait on the last attempt
-                time.sleep(2)  # Wait for 2 seconds before retrying
+            if attempt < retries - 1:
+                time.sleep(2)
             else:
                 return "Sorry, something went wrong after multiple attempts."
 
